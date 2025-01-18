@@ -32,7 +32,6 @@ void OmeTiffToChunkedConverter::Convert( const std::string& input_file, const st
                             tensorstore::ReadWriteMode::read).result());
 
   auto shape = store1.domain().shape();
-  auto read_chunk_shape = store1.chunk_layout().value().read_chunk_shape();
   auto data_type = GetDataTypeCode(store1.dtype().name()); 
 
   std::int64_t image_length = shape[3]; // as per tiled_tiff spec
@@ -41,8 +40,9 @@ void OmeTiffToChunkedConverter::Convert( const std::string& input_file, const st
   std::vector<std::int64_t> chunk_shape(num_dims,1);
   new_image_shape[y_dim] = image_length;
   new_image_shape[x_dim] = image_width;
-  chunk_shape[y_dim] = static_cast<std::int64_t>(read_chunk_shape[3]);
-  chunk_shape[x_dim] = static_cast<std::int64_t>(read_chunk_shape[4]);
+  auto chunk_layout = store1.chunk_layout().value();
+  chunk_shape[y_dim] = static_cast<std::int64_t>(chunk_layout.read_chunk_shape()[3]);
+  chunk_shape[x_dim] = static_cast<std::int64_t>(chunk_layout.read_chunk_shape()[4]);
 
   auto num_rows = static_cast<std::int64_t>(ceil(1.0*image_length/chunk_shape[y_dim]));
   auto num_cols = static_cast<std::int64_t>(ceil(1.0*image_width/chunk_shape[x_dim]));
