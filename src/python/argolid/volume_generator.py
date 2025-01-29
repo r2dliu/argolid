@@ -199,6 +199,7 @@ class VolumeGenerator:
         self.init_base_zarr_file()
         self.write_image_stack()
         self._create_zattr_file()
+        self._create_zgroup_file()
 
     def write_image_stack(self):
         """
@@ -240,6 +241,17 @@ class VolumeGenerator:
                     ]
         return axes_metadata
 
+    def _create_zgroup_file(self) -> None:
+        """
+        Creates a .zgroup file for the zarr pyramid.
+        """
+        zgroup_dict: dict = {"zarr_format": 2}
+
+        with open(f"{self._out_dir}/{self._image_name}/.zgroup", "w") as json_file:
+            json.dump(zgroup_dict, json_file)
+
+        with open(f"{self._out_dir}/{self._image_name}/{self._base_scale_key}/.zgroup", "w") as json_file:
+            json.dump(zgroup_dict, json_file)
 
     def _create_zattr_file(self) -> None:
         """
@@ -384,6 +396,16 @@ class PyramidGenerator3D:
 
         for future in write_futures:
             future.result()
+        self._create_zgroup_file(f"{self._zarr_loc_dir}/{level}")
+
+    def _create_zgroup_file(self, file_loc: str) -> None:
+        """
+        Creates a .zgroup file for the zarr pyramid.
+        """
+        zgroup_dict: dict = {"zarr_format": 2}
+
+        with open(f"{file_loc}/.zgroup", "w") as json_file:
+            json.dump(zgroup_dict, json_file)
 
     def _create_zattr_file(self, num_levels: int) -> None:        
         """
