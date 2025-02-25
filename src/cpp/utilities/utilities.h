@@ -60,4 +60,27 @@ inline std::tuple<int,int,int,int> GetZarrParams(VisType v){
 }
 
 std::optional<std::tuple<std::uint32_t, std::uint32_t>> GetTiffDims (const std::string filename);
+
+void CreateXML(
+    const std::string& image_name, 
+    const std::string& output_file, 
+    const std::vector<std::int64_t>& image_shape,
+    const std::string& image_dtype);
+
+void WriteTSZattrFilePlateImage(
+    const std::string& tiff_file_name, 
+    const std::string& zarr_root_dir, 
+    const std::unordered_map<int, std::vector<std::int64_t>>& plate_image_shape);
+
+std::tuple<std::optional<int>, std::optional<int>, std::optional<int>>ParseMultiscaleMetadata(const std::string& axes_list, int len);
+
+// custom hashing for using std::tuple as key
+struct TupleHash {
+    template <typename... Args>
+    std::size_t operator()(const std::tuple<Args...>& t) const {
+        return std::apply([](const auto&... args) {
+            return (std::hash<std::decay_t<decltype(args)>>{}(args) ^ ...);
+        }, t);
+    }
+};
 } // ns argolid

@@ -31,6 +31,7 @@ set(SOURCE
            src/cpp/core/chunked_pyramid_assembler.cpp
            src/cpp/core/chunked_base_to_pyr_gen.cpp
            src/cpp/core/ome_tiff_to_chunked_pyramid.cpp
+           src/cpp/core/pyramid_compositor.cpp
            src/cpp/core/pyramid_view.cpp
            src/cpp/utilities/utilities.cpp
 )

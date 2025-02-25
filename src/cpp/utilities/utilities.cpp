@@ -202,6 +202,51 @@ void WriteTSZattrFile(const std::string& tiff_file_name, const std::string& zarr
     }
 }
 
+void WriteTSZattrFilePlateImage(
+    const std::string& tiff_file_name, 
+    const std::string& zarr_root_dir, 
+    const std::unordered_map<int, std::vector<std::int64_t>>& plate_image_shape){
+
+    json zarr_multiscale_axes;
+    zarr_multiscale_axes = json::parse(R"([
+                    {"name": "c", "type": "channel"},
+                    {"name": "z", "type": "space", "unit": "micrometer"},
+                    {"name": "y", "type": "space", "unit": "micrometer"},
+                    {"name": "x", "type": "space", "unit": "micrometer"}
+                ])");
+    
+    
+    float level = 1.0;
+    json scale_metadata_list = json::array();
+    for(const auto& key_val: plate_image_shape){
+        json scale_metadata;
+        scale_metadata["path"] = std::to_string(std::get<0>(key_val));
+        scale_metadata["coordinateTransformations"] = {{{"type", "scale"}, {"scale", {1.0, 1.0, level, level}}}};
+        scale_metadata_list.push_back(scale_metadata);
+        level = level*2;
+    }
+
+    json combined_metadata;
+    combined_metadata["datasets"] = scale_metadata_list;
+    combined_metadata["version"] = "0.4";
+    combined_metadata["axes"] = zarr_multiscale_axes;
+    combined_metadata["name"] = tiff_file_name;
+    combined_metadata["metadata"] = {{"method", "mean"}};
+    json final_formated_metadata;
+#if defined(__clang__) || defined(_MSC_VER)
+// more details here: https://github.com/nlohmann/json/issues/2311
+    final_formated_metadata["multiscales"][0] = {combined_metadata};
+#else
+    final_formated_metadata["multiscales"] = {combined_metadata};
+#endif
+    std::ofstream f(zarr_root_dir + "/.zattrs",std::ios_base::trunc |std::ios_base::out);
+    if (f.is_open()){
+        f << final_formated_metadata;
+    } else {
+        PLOG_INFO <<"Unable to write .zattr file at "<< zarr_root_dir << ".";
+    }
+}
+
 void WriteVivZattrFile(const std::string& tiff_file_name, const std::string& zattr_file_loc, int min_level, int max_level){
     
     json scale_metadata_list = json::array();
@@ -318,6 +363,60 @@ void GenerateOmeXML(const std::string& image_name, const std::string& output_fil
     doc.save_file(output_file.c_str());
 }
 
+void CreateXML(
+    const std::string& image_name, 
+    const std::string& output_file, 
+    const std::vector<std::int64_t>& image_shape,
+    const std::string& image_dtype) {
+
+
+    if (image_shape.size() != 5) {
+        throw std::invalid_argument("image_shape must have length 5.");
+    }
+
+    pugi::xml_document doc;
+
+    // Create the root element <OME>
+    pugi::xml_node omeNode = doc.append_child("OME");
+    
+    // Add the namespaces and attributes to the root element
+    omeNode.append_attribute("xmlns") = "http://www.openmicroscopy.org/Schemas/OME/2016-06";
+    omeNode.append_attribute("xmlns:xsi") = "http://www.w3.org/2001/XMLSchema-instance";
+    auto creator = std::string{"Argolid "} + std::string{VERSION_INFO};
+    omeNode.append_attribute("Creator") = creator.c_str();
+    omeNode.append_attribute("UUID") = "urn:uuid:ce3367ae-0512-4e87-a045-20d87db14001";
+    omeNode.append_attribute("xsi:schemaLocation") = "http://www.openmicroscopy.org/Schemas/OME/2016-06 http://www.openmicroscopy.org/Schemas/OME/2016-06/ome.xsd";
+
+    // Create the <Image> element
+    pugi::xml_node imageNode = omeNode.append_child("Image");
+    imageNode.append_attribute("ID") = "Image:0";
+    imageNode.append_attribute("Name") = image_name.c_str();
+
+    // Create the <Pixels> element
+    pugi::xml_node pixelsNode = imageNode.append_child("Pixels");
+    pixelsNode.append_attribute("BigEndian") = "false";
+    pixelsNode.append_attribute("DimensionOrder") = "XYZCT";
+    pixelsNode.append_attribute("ID") = "Pixels:0";
+    pixelsNode.append_attribute("Interleaved") = "false";
+    pixelsNode.append_attribute("SizeC") = std::to_string(image_shape[1]).c_str();
+    pixelsNode.append_attribute("SizeZ") = std::to_string(image_shape[2]).c_str();
+    pixelsNode.append_attribute("SizeT") = std::to_string(image_shape[0]).c_str();
+    pixelsNode.append_attribute("SizeX") = std::to_string(image_shape[4]).c_str();
+    pixelsNode.append_attribute("SizeY") = std::to_string(image_shape[3]).c_str();
+    pixelsNode.append_attribute("Type") = image_dtype.c_str();
+
+    // Create the <Channel> elements
+    for(std::int64_t i=0; i<image_shape[1]; ++i){
+      pugi::xml_node channelNode = pixelsNode.append_child("Channel");
+      channelNode.append_attribute("ID") = ("Channel:0:" + std::to_string(i)).c_str();
+      channelNode.append_attribute("SamplesPerPixel") = "1";
+      // Create the <LightPath> elements
+      channelNode.append_child("LightPath");
+    }
+  
+    doc.save_file(output_file.c_str());
+}
+
 void WriteMultiscaleMetadataForSingleFile( const std::string& input_file , const std::string& output_dir, 
                                                                     int min_level, int max_level, VisType v)
 {
@@ -345,6 +444,31 @@ std::optional<std::tuple<std::uint32_t, std::uint32_t>> GetTiffDims (const std::
         return std::nullopt;
     }
 
+}
+
+std::tuple<std::optional<int>, std::optional<int>, std::optional<int>>ParseMultiscaleMetadata(const std::string& axes_list, int len){
+    
+    std::optional<int> t_index{std::nullopt}, c_index{std::nullopt}, z_index{std::nullopt};
+
+    assert(axes_list.length() <= 5);
+
+    if (axes_list.length() == len){
+        // no speculation
+        for (int i=0; i<axes_list.length(); ++i){
+            if(axes_list[i] == char{'T'}) t_index.emplace(i);
+            if(axes_list[i] == char{'C'}) c_index.emplace(i);
+            if(axes_list[i] == char{'Z'}) z_index.emplace(i);
+        }
+    } else // speculate
+    {
+        if (len == 3) {
+            z_index.emplace(0);
+        } else if (len == 4) {
+            z_index.emplace(1);
+            c_index.emplace(0);
+        }
+    }
+    return {t_index, c_index, z_index};
 }
 
 } // ns argolid
