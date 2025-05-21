@@ -174,21 +174,20 @@ class VolumeGenerator:
         c: int = args[3]
 
         zarr_array: ts.TensorStore = ts.open(zarr_spec).result()
-        write_futures: List[ts.Future[None]] = []
+        commit_futures: List[ts.Future[None]] = []
         try:
             br: BioReader = BioReader(input_file, backend="tensorstore")
             for y in range(0, br.Y, self.CHUNK_SIZE):
                 y_max: int = min([br.Y, y + self.CHUNK_SIZE])
                 for x in range(0, br.X, self.CHUNK_SIZE):
                     x_max: int = min([br.X, x + self.CHUNK_SIZE])
-                    write_futures.append(
-                        zarr_array[c, z, y:y_max, x:x_max].write(
+                    write_future = zarr_array[c, z, y:y_max, x:x_max].write(
                             br[y:y_max, x:x_max, 0, 0, 0].squeeze()
                         )
-                    )
+                    commit_futures.append(write_future.commit_future)
 
-            for future in write_futures:
-                future.result()
+            for commit_future in commit_futures:
+                commit_future.result()
         except Exception as e:
             print(f"Caught an exception for item : {e}")
 
@@ -381,21 +380,23 @@ class PyramidGenerator3D:
         }
 
         ds_zarr_array_write: ts.TensorStore = ts.open(ds_write_spec).result()
-        write_futures: List[ts.Future[None]] = []        
+
+        commit_futures: List[ts.Future[None]] = []
+
         for c in range(C):
             for z in range(Z):
                 for y in range(0, Y, self.CHUNK_SIZE):
                     y_max = min([Y, y + self.CHUNK_SIZE])
                     for x in range(0, X, self.CHUNK_SIZE):
                         x_max = min([X, x + self.CHUNK_SIZE])
-                        write_futures.append(
-                            ds_zarr_array_write[c, z, y:y_max, x:x_max].write(
-                                ds_zarr_array[c, z, y:y_max, x:x_max].read().result()
-                            )
-                        )
+                        block = ds_zarr_array[c, z, y:y_max, x:x_max].read().result()
+                        write_future = ds_zarr_array_write[c, z, y:y_max, x:x_max].write(block)
+                        commit_futures.append(write_future.commit_future)
 
-        for future in write_futures:
-            future.result()
+        # Ensure all writes are durable (i.e., non-transactional and committed)
+        for commit_future in commit_futures:
+            commit_future.result()
+
         self._create_zgroup_file(f"{self._zarr_loc_dir}/{level}")
 
     def _create_zgroup_file(self, file_loc: str) -> None:
