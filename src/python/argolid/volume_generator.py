@@ -465,7 +465,7 @@ class PyramidGenerator3D:
             num_levels (int): Number of pyramid levels to generate.
         """
         self._create_zattr_file(num_levels)
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=os.cpu_count() // 2, mp_context=get_context("spawn")
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=os.cpu_count() // 2
         ) as executor:
             executor.map(self.downsample_pyramid, range(1, num_levels+1))
